@@ -1,0 +1,85 @@
+name: CEREBRON Farm 30 Human Factors
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  agents:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {role: HUMAN_FACTORS_SYSTEMS_ANALYST, model: huggingface-projects/llama-3.2-3B-Instruct}
+          - {role: COGNITIVE_PSYCHOLOGY_ANALYST, model: huggingface-projects/gemma-2-9b-it}
+          - {role: ERGONOMICS_SPECIALIST, model: huggingface-projects/llama-3.2-3B-Instruct}
+          - {role: ATTENTION_VIGILANCE_ANALYST, model: huggingface-projects/gemma-2-9b-it}
+          - {role: MENTAL_WORKLOAD_ANALYST, model: huggingface-projects/llama-3.2-3B-Instruct}
+          - {role: DECISION_MAKING_ANALYST, model: huggingface-projects/gemma-2-9b-it}
+          - {role: HUMAN_ERROR_SPECIALIST, model: huggingface-projects/llama-3.2-3B-Instruct}
+          - {role: SAFETY_HUMAN_FACTORS_ANALYST, model: huggingface-projects/gemma-2-9b-it}
+          - {role: HUMAN_AI_INTERACTION_SPECIALIST, model: huggingface-projects/llama-3.2-3B-Instruct}
+          - {role: AUTOMATION_TRUST_ANALYST, model: huggingface-projects/gemma-2-9b-it}
+          - {role: PERCEPTION_SITUATION_AWARENESS_ANALYST, model: huggingface-projects/llama-3.2-3B-Instruct}
+          - {role: FATIGUE_SHIFTWORK_ANALYST, model: huggingface-projects/gemma-2-9b-it}
+          - {role: TEAM_COORDINATION_SPECIALIST, model: huggingface-projects/llama-3.2-3B-Instruct}
+          - {role: ORGANIZATIONAL_HUMAN_FACTORS_ANALYST, model: huggingface-projects/gemma-2-9b-it}
+          - {role: HUMAN_RELIABILITY_ANALYST, model: huggingface-projects/llama-3.2-3B-Instruct}
+          - {role: USER_RESEARCH_ACCESSIBILITY_ANALYST, model: huggingface-projects/gemma-2-9b-it}
+          - {role: FIELD_VALIDITY_EVIDENCE_AUDITOR, model: huggingface-projects/llama-3.2-3B-Instruct}
+          - {role: HUMAN_FACTORS_RED_TEAM, model: huggingface-projects/gemma-2-9b-it}
+          - {role: INDEPENDENT_REPLICATOR, model: huggingface-projects/llama-3.2-3B-Instruct}
+          - {role: OMEGA_HUMAN_FACTORS_JUDGE, model: huggingface-projects/gemma-2-9b-it}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gradio_client
+      - run: python worker/agent.py
+        env:
+          ROLE: ${{ matrix.role }}
+          MODEL: ${{ matrix.model }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.role }}
+          path: results/${{ matrix.role }}.json
+
+  omega:
+    if: always()
+    needs: agents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agent-*
+          path: gathered
+          merge-multiple: true
+      - name: Build evidence packet
+        run: |
+          python - <<'PY'
+          import json, glob, os
+          rows=[]
+          for f in glob.glob('gathered/*.json'):
+              try:
+                  rows.append(json.load(open(f, encoding='utf-8')))
+              except Exception as e:
+                  rows.append({'file':f,'success':False,'error':repr(e)})
+          models=sorted({r.get('model') for r in rows if r.get('model')})
+          packet={
+              'roles_received': len(rows),
+              'successful_external_ai_calls': sum(bool(r.get('success')) for r in rows),
+              'model_families': models,
+              'status': 'UNREVIEWED_EXTERNAL_AGENT_OUTPUT',
+              'results': rows
+          }
+          os.makedirs('omega', exist_ok=True)
+          json.dump(packet, open('omega/packet.json','w',encoding='utf-8'), ensure_ascii=False, indent=2)
+          print(json.dumps({k:packet[k] for k in ['roles_received','successful_external_ai_calls','model_families','status']}, ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: human-factors-omega-packet
+          path: omega/packet.json
